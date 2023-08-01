@@ -394,7 +394,10 @@ spinGlobe();
 
           let tfC = turf.featureCollection(epwcheck);
 
-          for (let i = 0; i < 15; i++) {
+          let searchLength = Math.min(15,epwcheck.length);
+          console.log("searchLength",searchLength)
+
+          for (let i = 0; i < searchLength; i++) {
             //console.log("oop");
 
             //var geoJ = turf.nearestPoint(clickPoint, tfC);
