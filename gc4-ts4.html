@@ -25,6 +25,7 @@
       body {
         margin: 0;
         padding: 0;
+        font-family: "Open Sans", "Helvetica Neue", Arial, Helvetica, sans-serif;
       }
       #map {
         position: absolute;
@@ -34,8 +35,8 @@
       }
       #overlay {
         position: absolute;
-        top: 10px;
-        right: 0;
+        top: 24px;
+        right: 24px;
         width: 300px;
         background-color: rgba(245, 245, 245, 0.8);
         backdrop-filter: blur(8px) contrast(80%) saturate(80%);
@@ -45,13 +46,17 @@
         border-radius: 4px;
       }
 
+      #overlay input[type=range] {
+        width: 100%;
+      }
+
       .geocoder {
         position: absolute;
         z-index: 1;
         width: 50%;
         left: 50%;
         margin-left: -25%;
-        top: 10px;
+        top: 24px;
       }
       .mapboxgl-ctrl-geocoder {
         min-width: 100%;
@@ -70,7 +75,16 @@
         <label for="shade">Shade strategy</label>
       </div>
       <hr>
-      <div id="clickData">Click Info</div>
+      <div id="filterbyui">
+        <p>Elevation Filter</p>
+        <label for="elemin">min: </label><span id="eleminval">0m</span>
+        <input type="range" id="elemin" name="filterby" min="-50" max="8000" value="0"/><br />
+        <label for="elemax">max: </label><span id="elemaxval">8000m</span>
+        <input type="range" id="elemax" name="filterby" min="-50" max="8000" value="8000"/><br />
+        
+      </div>
+      <hr>
+      <div id="clickData">Search/Click Point Info</div>
       <hr>
       <div id="pointData">Suggested Points Info</div>
     </div>
@@ -95,6 +109,7 @@
       const map = new mapboxgl.Map({
         container: "map",
         projection: 'mercator',
+        renderWorldCopies: false,
         // Choose from Mapbox's core styles, or make your own style with Mapbox Studio
         style: "mapbox://styles/mapbox/dark-v11",
         center: [-98, 38.88],
@@ -185,11 +200,52 @@
         
         }
 
+        let eleMin = document.querySelector("input[id=elemin]");
+        let eleMax = document.querySelector("input[id=elemax]");
+        let eleMinVal = 0;
+        let eleMaxVal = 8000;
+        let eleMinSpan = document.querySelector("span[id=eleminval]");
+        let eleMaxSpan = document.querySelector("span[id=elemaxval]");
+        //console.log("eleMin",eleMin);
+
+        eleMin.addEventListener("change", function () {  
+            eleMinVal = Number(this.value);
+            //console.log(eleMinVal);
+            eleMinSpan.innerHTML = eleMinVal+"m";
+            map.setFilter(
+                'unclustered-point', 
+                //['all', ['==', 'color', 'red'], ['>=', 'weight', 10], ...]
+                ['all', [">=", ["get", "Elevation"], eleMinVal], ["<=", ["get", "Elevation"], eleMaxVal]],
+            );
+        });
+
+        eleMin.addEventListener("input", function () {
+            eleMinVal = Number(this.value);
+            eleMinSpan.innerHTML = eleMinVal+"m";
+        });
+
+        eleMax.addEventListener("change", function () { 
+            eleMaxVal = Number(this.value);
+            console.log(eleMaxVal);
+            eleMaxSpan.innerHTML = eleMaxVal+"m";
+            map.setFilter(
+                'unclustered-point', 
+                //['all', ['==', 'color', 'red'], ['>=', 'weight', 10], ...]
+                ['all', [">=", ["get", "Elevation"], eleMinVal], ["<=", ["get", "Elevation"], eleMaxVal]],
+            );
+        });
+
+        eleMax.addEventListener("input", function () {
+            eleMaxVal = Number(this.value);
+            eleMaxSpan.innerHTML = eleMaxVal+"m";
+        });
+
         let srch = false;
 
         let searcher = new MapboxGeocoder({
           accessToken: mapboxgl.accessToken,
           mapboxgl: mapboxgl,
+          placeholder: "Type to search for your city...",
           marker: false,
           addressAccuracy: "place",
           zoom: 10.5,
@@ -465,7 +521,11 @@ spinGlobe();
           console.log("nearestpoint", nearestPoints);
 
           //let epwcheck = map.getSource('epwAfrica');
-          let epwcheck = map.querySourceFeatures("epwAfrica");
+          //let epwcheck = map.querySourceFeatures("epwAfrica");
+          let epwcheck = map.queryRenderedFeatures({
+            layers: ["unclustered-point"],
+        }
+            );
           console.log(epwcheck);
 
           let tfC = turf.featureCollection(epwcheck);
@@ -538,7 +598,7 @@ spinGlobe();
           // add data to overlay
           let pointData = document.querySelector("#pointData");
           let clickData = document.querySelector("#clickData");
-          clickData.innerHTML = `Clicked point altitude: ${ele}m<br/>Latitude: ${lat.toFixed(
+          clickData.innerHTML = `Search/Click Point Elevation: ${ele}m<br/>Search/Click Point Latitude: ${lat.toFixed(
             3
           )}<hr><br/><h3>Files ranked by elevation then latitude similarity to clicked point:</h3>`;
           pointData.innerHTML = "";
