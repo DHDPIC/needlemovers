@@ -26,7 +26,6 @@
         margin: 0;
         padding: 0;
         font-family: "Open Sans", "Helvetica Neue", Arial, Helvetica, sans-serif;
-        color: #404040;
       }
       #map {
         position: absolute;
@@ -39,9 +38,8 @@
         top: 24px;
         right: 24px;
         width: 300px;
-        background-color: rgba(243, 245, 249, 1);
-        /*backdrop-filter: blur(8px) contrast(80%) saturate(80%);*/
-        box-shadow: 0 0 10px 2px rgba(0,0,0,0.1);
+        background-color: rgba(245, 245, 245, 0.8);
+        backdrop-filter: blur(8px) contrast(80%) saturate(80%);
         max-height: 600px;
         overflow: scroll;
         padding: 16px;
@@ -62,14 +60,6 @@
       }
       .mapboxgl-ctrl-geocoder {
         min-width: 100%;
-        background-color: rgba(243, 245, 249, 1);
-      }
-
-      hr {
-        height: 1px;
-        border-width:0;
-        color:rgba(222,234,226,0.8);
-        background-color:rgba(222,234,226,0.8);
       }
     </style>
   </head>
@@ -120,7 +110,6 @@
         container: "map",
         projection: 'mercator',
         renderWorldCopies: false,
-
         // Choose from Mapbox's core styles, or make your own style with Mapbox Studio
         style: "mapbox://styles/mapbox/dark-v11",
         center: [-98, 38.88],
@@ -323,7 +312,7 @@
           type: "geojson",
           // Point to GeoJSON data. This example visualizes all M1.0+ earthquakes
           // from 12/22/15 to 1/21/16 as logged by USGS' Earthquake hazards program.
-          data: "data/x-combined.json",
+          data: "data/x-combined.geojson",
           cluster: false,
           clusterMaxZoom: 7, // Max zoom to cluster points on
           clusterRadius: 100, // Radius of each cluster when clustering points (defaults to 50)
@@ -512,26 +501,14 @@ spinGlobe();
           console.log("click 1");
           lng = e.lngLat.lng;
           lat = e.lngLat.lat;
-          console.log("click lng", lng, "click lat", lat);
+          console.log("lng", lng, "lat", lat);
           getElevation(e);
         });
 
         async function getElevation(e) {
           // Construct the API request.
-
-          let eleLng = lng;
-          if (Math.abs(eleLng) > 180) {
-            console.log("corrector...", eleLng);
-            if(eleLng > 0) {
-              eleLng -= 360;
-            } else {
-              console.log("+ + +");
-              eleLng += 360;
-            }
-          }
-          console.log("corrected...", lng);
           const query = await fetch(
-            `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${eleLng},${lat}.json?layers=contour&limit=50&access_token=${mapboxgl.accessToken}`,
+            `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${lng},${lat}.json?layers=contour&limit=50&access_token=${mapboxgl.accessToken}`,
             { method: "GET" }
           );
           if (query.status !== 200) return;
@@ -593,11 +570,6 @@ spinGlobe();
 
             //var geoJ = turf.nearestPoint(clickPoint, tfC);
             var geoJ = turf.nearestPoint(clickPoint, tfC);
-            //if (Math.abs(e.lngLat.lng - geoJ.geometry.coordinates[0]) > 180) {
-            if (Math.abs(lng - geoJ.geometry.coordinates[0]) > 180) {
-              console.log("alert!!!");
-              geoJ.geometry.coordinates[0] += lng > geoJ.geometry.coordinates[0] ? 360 : -360;
-            }
             console.log("geoj", geoJ);
             nearestPoints.push(geoJ);
             var id = geoJ.properties.featureIndex;
@@ -614,16 +586,13 @@ spinGlobe();
           //map.setFilter('unclustered-highlighted', ['in', 'FIPS', ...fips]);
           //map.setFilter('unclustered-highlighted', ['>=', 'Elevation', ...fips]);
           const myFeatures = nearestPoints.map(
-            (feature) => feature.properties.name
+            (feature) => feature.properties.WMO
           );
-
-          console.log("mf", myFeatures);
           map.setFilter("unclustered-highlighted", [
             "in",
-            "name",
+            "WMO",
             ...myFeatures,
           ]);
-          console.log("filtering done");
 
           //sort features
 
