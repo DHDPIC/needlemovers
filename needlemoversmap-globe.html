@@ -114,7 +114,7 @@
         left: 0px;
       }
 
-      .geocoder button {
+      #explore {
         color: #fff;
         background-color: #6666ff;
         border-radius: 8px;
@@ -123,7 +123,7 @@
         box-shadow: 0px 3px 5px 0px rgba(0, 0, 0, 0.2);
       }
 
-      .geocoder button:hover {
+      #explore:hover {
         color: #000;
         background-color: #6666ff;
         box-shadow: 0px 5px 8px 0px rgba(0, 0, 0, 0.2);
@@ -262,6 +262,8 @@
         marker.on("dragend", onMarkerDragEnd);
 
         var showMarker = true;
+
+        var popup = new mapboxgl.Popup({});
 
         map.addSource("epwData", {
           type: "geojson",
@@ -500,6 +502,8 @@
           console.log("used!!!");
           console.log(e.result.center);
           //
+          popup.remove();
+          //
           srch = true;
           //
           lng = e.result.center[0]; //e.lngLat.lng;
@@ -647,12 +651,14 @@
               coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
             }
 
-            new mapboxgl.Popup()
+            //new mapboxgl.Popup()
+            popup
               .setLngLat(coordinates)
               .setHTML(popContent)
               .addTo(map);
             //
             getElevation(e);
+            showMarker = true;
           } else {
             console.log("nothing!");
 
@@ -669,6 +675,8 @@
           lat = coords.lat;//e.lngLat.lat;
           console.log("drag lng", lng, "drag lat", lat);
           showMarker = true;
+
+          popup.remove();
 
           getElevation();
         }
@@ -1000,7 +1008,7 @@
             pointData.innerHTML += `<hr>`;
           });
 
-          // create a point to include in the bounding box for zooming/fit bounds
+          // create a click point to include in the bounding box for zooming/fit bounds
           let myClickedPoint = {
             type: "Feature",
             properties: {
@@ -1012,8 +1020,22 @@
             },
           };
 
+          // create a marker point to include in the bounding box for zooming/fit bounds
+          let myMarkerPoint = {
+            type: "Feature",
+            properties: {
+              Name: "marker point",
+            },
+            geometry: {
+              type: "Point",
+              coordinates: [marker.getLngLat().lng, marker.getLngLat().lat],
+            },
+          };
+
+
           // add the click point to the array for the bounding box
           nearestPoints.push(myClickedPoint);
+          nearestPoints.push(myMarkerPoint);
           console.log("np+cp", nearestPoints);
 
           let bbox = turf.bbox(turf.featureCollection(nearestPoints));
