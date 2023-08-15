@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>NeedleMovers Globe</title>
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+
+    <meta http-equiv="Permissions-Policy" content="interest-cohort=()" />
+
+    <link
+      href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css"
+      rel="stylesheet"
+    />
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+
+    <!-- load in geocode search-->
+    <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.css"
+      type="text/css"
+    />
+
+    <script src="https://d3js.org/d3.v4.js"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: "Open Sans", "Helvetica Neue", Arial, Helvetica, sans-serif;
+        color: #404040;
+      }
+      #map {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #overlay {
+        visibility: hidden;
+        position: absolute;
+        top: 24px;
+        right: 24px;
+        width: 300px;
+        background-color: rgba(243, 245, 249, 1);
+        /*backdrop-filter: blur(8px) contrast(80%) saturate(80%);*/
+        box-shadow: 0 0 10px 2px rgba(0, 0, 0, 0.1);
+        max-height: 600px;
+        overflow: scroll;
+        padding: 16px;
+        border-radius: 4px;
+      }
+
+      #overlay input[type="range"] {
+        width: 100%;
+      }
+
+      .geocoder {
+        position: absolute;
+        z-index: 1;
+        width: 50%;
+        left: 50%;
+        margin-left: -25%;
+        top: 33%;
+      }
+
+      .geocoder-moved {
+        top: 24px;
+        transition: top 1s linear;
+      }
+
+      .mapboxgl-ctrl-geocoder {
+        min-width: 100%;
+        background-color: rgba(243, 245, 249, 1);
+      }
+
+      #cover {
+        position: absolute;
+        top: 0px;
+        left: 0px;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(102, 102, 255, 0.2);
+        backdrop-filter: blur(16px) brightness(100%) contrast(90%)
+          saturate(200%);
+        /*max-height: 600px;*/
+        overflow: scroll;
+        padding: 16px;
+      }
+
+      .cover-faded {
+        visibility: hidden;
+        opacity: 0;
+        transition: visibility 0s 0.5s, opacity 0.5s linear;
+      }
+
+      hr {
+        height: 1px;
+        border-width: 0;
+        color: rgba(222, 234, 226, 0.8);
+        background-color: rgba(222, 234, 226, 0.8);
+      }
+
+      #explore {
+        /*position:absolute;
+        top: 40%+50px;
+        left: 50%;*/
+        position: absolute;
+        top: 48px;
+        left: 0px;
+      }
+
+      .geocoder button {
+        color: #fff;
+        background-color: #6666ff;
+        border-radius: 8px;
+        padding: 8px;
+        border: none;
+        box-shadow: 0px 3px 5px 0px rgba(0, 0, 0, 0.2);
+      }
+
+      .geocoder button:hover {
+        color: #000;
+        background-color: #6666ff;
+        box-shadow: 0px 5px 8px 0px rgba(0, 0, 0, 0.2);
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="overlay">
+      <div id="colorbyui">
+        <input
+          type="radio"
+          id="total"
+          name="colorby"
+          value="total"
+          checked="true"
+        />
+        <label for="total">NeedleMovers Total</label><br />
+        <input type="radio" id="sun" name="colorby" value="sun" />
+        <label for="sun">Sun strategy</label><br />
+        <input type="radio" id="shade" name="colorby" value="shade" />
+        <label for="shade">Shade strategy</label>
+      </div>
+      <hr />
+      <div id="filterbyui">
+        <p>Elevation Filter</p>
+        <label for="elemin">min: </label><span id="eleminval">0m</span>
+        <input
+          type="range"
+          id="elemin"
+          name="filterby"
+          min="-50"
+          max="8000"
+          value="0"
+        /><br />
+        <label for="elemax">max: </label><span id="elemaxval">8000m</span>
+        <input
+          type="range"
+          id="elemax"
+          name="filterby"
+          min="-50"
+          max="8000"
+          value="8000"
+        /><br />
+      </div>
+      <hr />
+      <div id="clickData">Search/Click Point Info</div>
+      <hr />
+      <div id="pointData">Suggested Points Info</div>
+    </div>
+
+    <div id="cover"></div>
+
+    <div id="geocoder" class="geocoder">
+      <button type="button" id="explore">Explore the Map</button>
+    </div>
+
+    <script>
+      // how to sort
+      let weightedSort = true;
+
+      // vars for click location
+      let lng;
+      let lat;
+      let ele;
+
+      const zoomThreshold = 5;
+
+      let spinEnabled = true;
+      const secondsPerRevolution = 90;
+      // Above zoom level 5, do not rotate.
+      const maxSpinZoom = 5;
+      // Rotate at intermediate speeds between zoom levels 3 and 5.
+      const slowSpinZoom = 3;
+
+      mapboxgl.accessToken =
+        "pk.eyJ1IjoiZGhkcGljIiwiYSI6IkZfUEVoTUUifQ.rNj-tr8788GTdoGnyMEtAQ";
+      const map = new mapboxgl.Map({
+        container: "map",
+        //projection: "mercator",
+        renderWorldCopies: false,
+        logoPosition: "bottom-right",
+        attributionControl: false,
+
+        // Choose from Mapbox's core styles, or make your own style with Mapbox Studio
+        style: "mapbox://styles/mapbox/light-v11",
+        center: [0, 30],
+        minZoom: 1.5,
+        zoom: 3.0,
+      });
+
+      map.addControl(new mapboxgl.AttributionControl(), "bottom-left");
+
+      map.on("load", () => {
+        function spinGlobe() {
+          console.log("spin");
+          const zoom = map.getZoom();
+          //if (spinEnabled && !userInteracting && zoom < maxSpinZoom) {
+          let distancePerSecond = 360 / secondsPerRevolution;
+          //if (zoom > slowSpinZoom) {
+          // Slow spinning at higher zooms
+          const zoomDif = (maxSpinZoom - zoom) / (maxSpinZoom - slowSpinZoom);
+          distancePerSecond *= zoomDif;
+          //}
+          const center = map.getCenter();
+          center.lng -= distancePerSecond;
+          // Smoothly animate the map over one second.
+          // When this animation is complete, it calls a 'moveend' event.
+          map.easeTo({ center, duration: 1000, easing: (n) => n });
+          //}
+        }
+
+        spinGlobe();
+
+        map.on("moveend", () => {
+          if (spinEnabled) {
+            spinGlobe();
+          }
+        });
+
+        map.setFog({
+          color: "rgb(186, 210, 235)", // Lower atmosphere
+          "high-color": "rgb(200, 200, 223)", // Upper atmosphere
+          "horizon-blend": 0.03, // Atmosphere thickness (default 0.2 at low zooms)
+          "space-color": "rgb(250, 245, 255)", // Background color
+          "star-intensity": 0.0, // Background star brightness (default 0.35 at low zoooms )
+        });
+
+        var marker = new mapboxgl.Marker({
+          color: "#000",
+          scale: 0.8,
+          draggable: true,
+        });
+
+        marker.on("dragend", onMarkerDragEnd);
+
+        var showMarker = true;
+
+        map.addSource("epwData", {
+          type: "geojson",
+          data: "data/x-combined.geojson",
+          cluster: false,
+          //clusterMaxZoom: 7, // Max zoom to cluster points on
+          //clusterRadius: 100, // Radius of each cluster when clustering points (defaults to 50)
+        });
+
+        let ptExpr = ["get", "HDD18"];
+        let ptColor = [
+          "interpolate",
+          ["linear"],
+          ptExpr,
+          0,
+          "#003033",
+          2000,
+          "#47C2FF",
+          4000,
+          "#B3C6FA",
+          6000,
+          "#FEB6F8",
+          8000,
+          "#FE295E",
+        ];
+
+        let rad = document.querySelectorAll("input[name=colorby]");
+        //console.log(rad);
+
+        for (var i = 0; i < rad.length; i++) {
+          rad[i].addEventListener("change", function () {
+            console.log(this.value);
+            if (this.value === "total") {
+              ptExpr = ["+", ["get", "CDD10"], ["get", "HDD18"]];
+              map.setPaintProperty("unclustered-point", "circle-color", [
+                "interpolate",
+                ["linear"],
+                ["+", ["get", "CDD10"], ["get", "HDD18"]],
+                0,
+                "#003033",
+                2000,
+                "#47C2FF",
+                4000,
+                "#B3C6FA",
+                6000,
+                "#FEB6F8",
+                8000,
+                "#FE295E",
+              ]);
+              map.setPaintProperty("unclustered-highlighted", "circle-color", [
+                "interpolate",
+                ["linear"],
+                ["+", ["get", "CDD10"], ["get", "HDD18"]],
+                0,
+                "#003033",
+                2000,
+                "#47C2FF",
+                4000,
+                "#B3C6FA",
+                6000,
+                "#FEB6F8",
+                8000,
+                "#FE295E",
+              ]);
+            } else if (this.value === "sun") {
+              ptExpr = ["get", "HDD18"];
+              map.setPaintProperty("unclustered-point", "circle-color", [
+                "interpolate",
+                ["linear"],
+                ["get", "HDD18"],
+                0,
+                "#003033",
+                2000,
+                "#47C2FF",
+                4000,
+                "#B3C6FA",
+                6000,
+                "#FEB6F8",
+                8000,
+                "#FE295E",
+              ]);
+              map.setPaintProperty("unclustered-highlighted", "circle-color", [
+                "interpolate",
+                ["linear"],
+                ["get", "HDD18"],
+                0,
+                "#003033",
+                2000,
+                "#47C2FF",
+                4000,
+                "#B3C6FA",
+                6000,
+                "#FEB6F8",
+                8000,
+                "#FE295E",
+              ]);
+            } else if (this.value === "shade") {
+              ptExpr = ["get", "CDD10"];
+              map.setPaintProperty("unclustered-point", "circle-color", [
+                "interpolate",
+                ["linear"],
+                ["get", "CDD10"],
+                0,
+                "#003033",
+                2000,
+                "#47C2FF",
+                4000,
+                "#B3C6FA",
+                6000,
+                "#FEB6F8",
+                8000,
+                "#FE295E",
+              ]);
+              map.setPaintProperty("unclustered-highlighted", "circle-color", [
+                "interpolate",
+                ["linear"],
+                ["get", "CDD10"],
+                0,
+                "#003033",
+                2000,
+                "#47C2FF",
+                4000,
+                "#B3C6FA",
+                6000,
+                "#FEB6F8",
+                8000,
+                "#FE295E",
+              ]);
+            }
+          });
+        }
+
+        let eleMin = document.querySelector("input[id=elemin]");
+        let eleMax = document.querySelector("input[id=elemax]");
+        let eleMinVal = 0;
+        let eleMaxVal = 8000;
+        let eleMinSpan = document.querySelector("span[id=eleminval]");
+        let eleMaxSpan = document.querySelector("span[id=elemaxval]");
+        //console.log("eleMin",eleMin);
+
+        eleMin.addEventListener("change", function () {
+          eleMinVal = Number(this.value);
+          //console.log(eleMinVal);
+          eleMinSpan.innerHTML = eleMinVal + "m";
+          map.setFilter(
+            "unclustered-point",
+            //['all', ['==', 'color', 'red'], ['>=', 'weight', 10], ...]
+            [
+              "all",
+              [">=", ["get", "Elevation"], eleMinVal],
+              ["<=", ["get", "Elevation"], eleMaxVal],
+            ]
+          );
+        });
+
+        eleMin.addEventListener("input", function () {
+          eleMinVal = Number(this.value);
+          eleMinSpan.innerHTML = eleMinVal + "m";
+        });
+
+        eleMax.addEventListener("change", function () {
+          eleMaxVal = Number(this.value);
+          console.log(eleMaxVal);
+          eleMaxSpan.innerHTML = eleMaxVal + "m";
+          map.setFilter(
+            "unclustered-point",
+            //['all', ['==', 'color', 'red'], ['>=', 'weight', 10], ...]
+            [
+              "all",
+              [">=", ["get", "Elevation"], eleMinVal],
+              ["<=", ["get", "Elevation"], eleMaxVal],
+            ]
+          );
+        });
+
+        eleMax.addEventListener("input", function () {
+          eleMaxVal = Number(this.value);
+          eleMaxSpan.innerHTML = eleMaxVal + "m";
+        });
+
+        let srch = false;
+
+        let searcher = new MapboxGeocoder({
+          accessToken: mapboxgl.accessToken,
+          mapboxgl: mapboxgl,
+          placeholder: "Type to search for your city...",
+          marker: false,
+          addressAccuracy: "place",
+          zoom: 10.5,
+          flyTo: {
+            padding: { top: 100, bottom: 100, left: 100, right: 400 },
+            maxZoom: 10.5,
+          },
+          clearOnBlur: true,
+        });
+
+        function disappearCover() {
+          let cov = document.querySelector("#cover");
+          let geo = document.querySelector(".geocoder");
+          let ovr = document.querySelector("#overlay");
+          let but = document.querySelector("#explore");
+
+          cov.className = "cover-faded";
+          geo.classList.add("geocoder-moved");
+          ovr.style.visibility = "visible";
+          but.style.visibility = "hidden";
+
+          spinEnabled = false;
+        }
+
+        function disappearCover2() {
+          let cov = document.querySelector("#cover");
+          let geo = document.querySelector(".geocoder");
+          let ovr = document.querySelector("#overlay");
+          let but = document.querySelector("#explore");
+
+          cov.className = "cover-faded";
+          geo.classList.add("geocoder-moved");
+          ovr.style.visibility = "visible";
+          but.style.visibility = "hidden";
+
+          spinEnabled = false;
+          map.zoomTo(2.0, {
+            duration: 1300,
+          });
+        }
+
+        //- Using a function pointer:
+        document.querySelector("#explore").onclick = disappearCover2;
+
+        searcher.on("result", (e) => {
+          disappearCover();
+        });
+
+        searcher.on("result", (e) => {
+          console.log("used!!!");
+          console.log(e.result.center);
+          //
+          srch = true;
+          //
+          lng = e.result.center[0]; //e.lngLat.lng;
+          lat = e.result.center[1]; //e.lngLat.lat;
+          // not working 100% yet, falters on double search
+          // deferred to after arriving at destination
+          //getElevation(e);
+
+          map.setFilter("unclustered-highlighted", ["in", "WMO", ""]);
+        });
+
+        /*map.addControl(
+          // add search box
+          searcher
+        );*/
+
+        document.getElementById("geocoder").appendChild(searcher.onAdd(map));
+
+        map.on("moveend", (e) => {
+          //console.log("A moveend event occurred.");
+          if (srch) {
+            getElevation(e);
+          }
+        });
+
+        map.addLayer({
+          id: "unclustered-point",
+          type: "circle",
+          source: "epwData",
+          filter: ["!", ["has", "point_count"]],
+          paint: {
+            // interpolate CDD10 + HDD18 = needlemover hours
+
+            "circle-color": [
+              "interpolate",
+              ["linear"],
+              ["+", ["get", "CDD10"], ["get", "HDD18"]],
+              0,
+              "#003033",
+              2000,
+              "#47C2FF",
+              4000,
+              "#B3C6FA",
+              6000,
+              "#FEB6F8",
+              8000,
+              "#FE295E",
+            ],
+            "circle-opacity": 1,
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              3,
+              2,
+              5,
+              4,
+              10,
+              8,
+            ], //2,
+          },
+        });
+
+        map.addLayer({
+          id: "unclustered-highlighted",
+          type: "circle",
+          source: "epwData",
+          visibility: "visible",
+          paint: {
+            "circle-color": [
+              "interpolate",
+              ["linear"],
+              ["+", ["get", "CDD10"], ["get", "HDD18"]],
+              0,
+              "#003033",
+              2000,
+              "#47C2FF",
+              4000,
+              "#B3C6FA",
+              6000,
+              "#FEB6F8",
+              8000,
+              "#FE295E",
+            ],
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 3, 10, 8], //6,
+            "circle-stroke-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              2,
+              2,
+              8,
+              3,
+            ], //3,
+            "circle-stroke-color": "#000",
+          },
+          filter: ["==", ["get", "WMO"], ""], // filter works
+        });
+
+        // Change the cursor to a pointer when the mouse is over the places layer.
+        map.on(
+          "mouseenter",
+          ["unclustered-point", "unclustered-highlighted"],
+          () => {
+            map.getCanvas().style.cursor = "pointer";
+          }
+        );
+
+        // Change it back to a pointer when it leaves.
+        map.on(
+          "mouseleave",
+          ["unclustered-point", "unclustered-highlighted"],
+          () => {
+            map.getCanvas().style.cursor = "";
+          }
+        );
+
+        map.on("click", function (e) {
+          console.log("click on the map");
+          lng = e.lngLat.lng;
+          lat = e.lngLat.lat;
+          console.log("click lng", lng, "click lat", lat);
+
+          let f = map.queryRenderedFeatures(e.point, {
+            layers: ["unclustered-point", "unclustered-highlighted"],
+          });
+          if (f.length) {
+            console.log("ffff >>>>", f[0]); //topmost feature
+            //
+            console.log("click for a pop up");
+            console.log(e);
+            //map.removeLayer(marker);
+            showMarker = false;
+
+            console.log("dig", f[0]);
+
+            const coordinates = f[0].geometry.coordinates.slice();
+            const popName = f[0].properties.name;
+            const popElevation = `Elevation: ${f[0].properties.Elevation}m`;
+            const popDownload = `<a href="${f[0].properties.URL}">Load File into Dashboard</a>`;
+            const popContent = `<h4>${popName}</h4><div>${popElevation}</div><div>${popDownload}</div>`;
+
+            // make sure there aren't duplicates
+            while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
+              coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
+            }
+
+            new mapboxgl.Popup()
+              .setLngLat(coordinates)
+              .setHTML(popContent)
+              .addTo(map);
+            //
+            getElevation(e);
+          } else {
+            console.log("nothing!");
+
+            showMarker = true;
+
+            getElevation(e);
+          }
+        });
+
+        function onMarkerDragEnd() {
+          console.log("dragged the marker");
+          const coords = marker.getLngLat();
+          lng = coords.lng;//e.lngLat.lng;
+          lat = coords.lat;//e.lngLat.lat;
+          console.log("drag lng", lng, "drag lat", lat);
+          showMarker = true;
+
+          getElevation();
+        }
+
+        /*map.on(
+          "click",
+          ["unclustered-point", "unclustered-highlighted"],
+          (e) => {
+            console.log("click for a pop up");
+            //map.removeLayer(marker);
+            showMarker = false;
+
+            const coordinates = e.features[0].geometry.coordinates.slice();
+            const popName = e.features[0].properties.name;
+            const popElevation = `Elevation: ${e.features[0].properties.Elevation}m`;
+            const popDownload = `<a href="${e.features[0].properties.URL}">Load File into Dashboard</a>`;
+            const popContent = `<h4>${popName}</h4><div>${popElevation}</div><div>${popDownload}</div>`;
+
+            // make sure there aren't duplicates
+            while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
+              coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
+            }
+
+            new mapboxgl.Popup()
+              .setLngLat(coordinates)
+              .setHTML(popContent)
+              .addTo(map);
+          }
+        );*/
+
+        /*map.on("zoom", () => {
+          if (map.getZoom() > zoomThreshold) {
+            map.setPaintProperty("unclustered-point", "circle-opacity", 1);
+            map.setPaintProperty("unclustered-highlighted", "circle-opacity", 1);
+          } else {
+            map.setPaintProperty("unclustered-point", "circle-opacity", 0);
+            map.setPaintProperty("unclustered-highlighted","circle-opacity",1);
+          }
+        });*/
+
+        /*map.on("click", (e) => {
+          console.log("click on the map");
+          console.log("l:", e);
+          console.log(map.getStyle().layers);
+
+          lng = e.lngLat.lng;
+          lat = e.lngLat.lat;
+          console.log("click lng", lng, "click lat", lat);
+
+          showMarker = true;
+
+          getElevation(e);
+        });*/
+
+        async function getElevation(e) {
+          console.log("get elevation...");
+
+          //
+          // add marker
+          if (showMarker) {
+            marker.setLngLat([lng, lat]).addTo(map);
+          }
+
+          // correct for clicks that are near to -180 180 longitude and draw points from across the divide
+          let eleLng = lng;
+          if (Math.abs(eleLng) > 180) {
+            console.log("need to correct...", eleLng);
+            if (eleLng > 0) {
+              eleLng -= 360;
+            } else {
+              eleLng += 360;
+            }
+          }
+          console.log("corrected...", lng);
+          // Construct the API request.
+          const query = await fetch(
+            `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${eleLng},${lat}.json?layers=contour&limit=50&access_token=${mapboxgl.accessToken}`,
+            { method: "GET" }
+          );
+          if (query.status !== 200) return;
+          const data = await query.json();
+          // Get all the returned features.
+          const allFeatures = data.features;
+          //console.log(allFeatures);
+          // For each returned feature, add elevation data to the elevations array.
+          const elevations = allFeatures.map(
+            (feature) => feature.properties.ele
+          );
+          // In the elevations array, find the largest value.
+          const highestElevation = Math.max(...elevations);
+          console.log("highest elevation is:", highestElevation);
+          ele = highestElevation;
+
+          // search for nearest points with turf js
+          let clickPoint = turf.point([lng, lat]);
+
+          let nearestPoints = [];
+          console.log("nearestpoint", nearestPoints);
+
+          // alternative approach is to search source features, not rendered features,
+          // but then would need to filter the returned source data by elevation or other filters.
+          let epwcheck = map.querySourceFeatures("epwData");
+          /*let epwcheck = map.queryRenderedFeatures({
+            layers: ["unclustered-point"],
+          });*/
+          //console.log("epw check 1", epwcheck);
+
+          // filter for altitude!!!
+          epwcheck = epwcheck.filter(
+            (item) =>
+              item.properties.Elevation <= eleMaxVal &&
+              item.properties.Elevation >= eleMinVal
+          );
+          //console.log("epw check 2", epwcheck);
+
+          // convert to a feature collection
+          let tfC = turf.featureCollection(epwcheck);
+
+          // using 15 points because of triplicate files
+          let searchLength = Math.min(15, epwcheck.length);
+          //console.log("searchLength", searchLength);
+
+          for (let i = 0; i < searchLength; i++) {
+            var geoJ = turf.nearestPoint(clickPoint, tfC);
+            //if (Math.abs(e.lngLat.lng - geoJ.geometry.coordinates[0]) > 180) {
+            if (Math.abs(lng - geoJ.geometry.coordinates[0]) > 180) {
+              console.log("alert! point lng is outside bounds, correct...");
+              geoJ.geometry.coordinates[0] +=
+                lng > geoJ.geometry.coordinates[0] ? 360 : -360;
+            }
+            //console.log("geoj", geoJ);
+            nearestPoints.push(geoJ);
+            var id = geoJ.properties.featureIndex;
+            //remove from features point that was found
+            tfC.features.splice(id, 1);
+          }
+
+          console.log("np", nearestPoints);
+          // not sure if this line below is useful or not!
+          //epwData.features.push(...nearestPoints);
+
+          const myFeatures = nearestPoints.map(
+            (feature) => feature.properties.name
+          );
+          console.log("mf", myFeatures);
+
+          // set filter for highlighted points
+          map.setFilter("unclustered-highlighted", [
+            "in",
+            "name",
+            ...myFeatures,
+          ]);
+          console.log("filtering done");
+
+          //sort features
+          if (weightedSort) {
+            wEleArr = [];
+            wLatArr = [];
+            wDisArr = [];
+            wScoArr = [];
+            // set elevation to 1 if it is 0 to avoid crazy
+            let tmpEle = ele;
+            if (tmpEle == 0) {
+              tmpEle = 1;
+            }
+
+            for (let i = 0; i < nearestPoints.length; i++) {
+              wEleArr[i] = Math.abs(
+                nearestPoints[i].properties.Elevation - tmpEle
+              );
+              wLatArr[i] = Math.abs(
+                nearestPoints[i].geometry.coordinates[1] - lat
+              );
+              wDisArr[i] = turf.distance(
+                nearestPoints[i].geometry.coordinates,
+                clickPoint
+              );
+              wScoArr[i] = wEleArr[i] * 1 + wLatArr[i] * 1000 + wDisArr[i] * 10;
+              // add into nearestPoints
+              nearestPoints[i].properties.distance = wDisArr[i];
+              nearestPoints[i].properties.score = wScoArr[i];
+            }
+            /*console.log("ele", ele);
+            console.log("w e",wEleArr);
+            console.log("lat", lat);
+            console.log("w l",wLatArr);
+            console.log("w d",wDisArr);*/
+            console.log("score", wScoArr);
+            //console.log("np sc", nearestPoints);
+
+            // sort by score
+            const sortedFeatures = nearestPoints.sort((a, b) => {
+              return a.properties.score - b.properties.score;
+            });
+          } else {
+            // sort sequentially
+            const sortedFeatures = nearestPoints.sort((a, b) => {
+              //return Math.abs(a.properties.Elevation - ele) - Math.abs(b.properties.Elevation - ele); // single sort works
+              //return Math.abs(a.properties.Elevation - ele) - Math.abs(b.properties.Elevation - ele) || Math.abs(a.geometry.coordinates[1] - lat) - Math.abs(b.geometry.coordinates[1] - lat); // chained double sort: elevation, then latitude
+
+              return (
+                Math.abs(a.properties.Elevation - ele) -
+                  Math.abs(b.properties.Elevation - ele) ||
+                Math.abs(a.geometry.coordinates[1] - lat) -
+                  Math.abs(b.geometry.coordinates[1] - lat)
+              ); // chained double sort: elevation, then latitude
+            });
+          }
+
+          // add data to overlay
+          let pointData = document.querySelector("#pointData");
+          let clickData = document.querySelector("#clickData");
+          //clickData.innerHTML = `Search/Click Point Elevation: ${ele}m<br/>Search/Click Point Latitude: ${lat.toFixed(3)}<hr><br/><h3>Files ranked by elevation then latitude similarity to clicked point:</h3>`;
+          clickData.innerHTML = `Search/Click Point Elevation: ${ele}m<br/>Search/Click Point Latitude: ${lat.toFixed(
+            3
+          )}`;
+          pointData.innerHTML = "";
+          nearestPoints.forEach((element) => {
+            // make an svg for each point
+
+            // make data from temperatures
+            let tempData = [
+              element.properties["1% Cooling DB"],
+              element.properties["99% Heating DB"],
+            ];
+
+            //console.log("temp data", tempData);
+
+            // color
+            const SparkColorScale = d3
+              .scaleLinear()
+              .domain([-50, -25, 0, 25, 50])
+              //.range(["royalblue", "skyblue", "honeydew", "gold", "red"])
+              .range(["#003033", "#47C2FF", "#B3C6FA", "#FEB6F8", "#FE295E"])
+              .clamp(true);
+
+            // set the dimensions and margins of the graph
+            var sparkMargin = { top: 10, right: 10, bottom: 20, left: 30 },
+              sparkWidth = 250 - sparkMargin.left - sparkMargin.right,
+              sparkHeight = 60 - sparkMargin.top - sparkMargin.bottom;
+
+            // append the svg object to the body of the page
+            var svg = d3
+              //.select("#my_dataviz")
+              .select("#pointData")
+              .append("svg")
+              .attr("width", sparkWidth + sparkMargin.left + sparkMargin.right)
+              .attr(
+                "height",
+                sparkHeight + sparkMargin.top + sparkMargin.bottom
+              )
+              .append("g")
+              .attr(
+                "transform",
+                "translate(" + sparkMargin.left + "," + sparkMargin.top + ")"
+              );
+
+            // X axis
+            var x = d3.scaleLinear().domain([-50, 50]).range([0, sparkWidth]);
+
+            svg
+              .append("g")
+              .attr("transform", "translate(0," + sparkHeight + ")")
+              .call(d3.axisBottom(x))
+              .selectAll("text")
+              .attr("transform", "translate(-10,0)rotate(-45)")
+              .style("text-anchor", "end");
+
+            // Add Y axis
+            var y = d3.scaleLinear().domain([0, 8000]).range([sparkHeight, 0]);
+            //svg.append("g")
+            //.call(d3.axisLeft(y));
+
+            // Lines
+            svg
+              .selectAll("myline")
+              .data(tempData)
+              .enter()
+              .append("line")
+              .attr("x1", function (d) {
+                return x(d);
+              })
+              .attr("x2", function (d) {
+                return x(d);
+              })
+              .attr("y1", -10 + y(element.properties.Elevation))
+              .attr("y2", y(0))
+              .attr("stroke-width", 2)
+              .attr("stroke", (d) => {
+                return SparkColorScale(d);
+              });
+
+            // Circles
+            svg
+              .selectAll("mycircle")
+              .data(tempData)
+              .enter()
+              .append("circle")
+              .attr("cx", function (d) {
+                return x(d);
+              })
+              .attr("cy", -10 + y(element.properties.Elevation))
+              .attr("r", "6")
+              .style("fill", (d) => {
+                return SparkColorScale(d);
+              });
+            //
+
+            pointData.innerHTML += `<div>${element.properties.WMO}: ${element.properties.name}</div>`;
+            pointData.innerHTML += `<div>Distance: ${element.properties.distance.toFixed(
+              2
+            )}km</div>`;
+            pointData.innerHTML += `<div>Elevation: ${element.properties.Elevation}m</div>`;
+            pointData.innerHTML += `<div>E Delta: ${Math.abs(
+              element.properties.Elevation - ele
+            )}m</div>`;
+            pointData.innerHTML += `<div>Latitude: ${element.geometry.coordinates[1].toFixed(
+              3
+            )}</div>`;
+            pointData.innerHTML += `<div>L Delta: ${Math.abs(
+              element.geometry.coordinates[1] - lat
+            ).toFixed(3)}</div>`;
+            pointData.innerHTML += `<div>Score: ${
+              element.properties.score.toFixed(2)
+              //Math.abs(element.properties.Elevation - ele) / 8000 +
+              //Math.abs(element.geometry.coordinates[1] - lat) / 90
+            }</div>`;
+            pointData.innerHTML += `<div><a href="${element.properties.URL}">Load File into Dashboard</a></div>`;
+            pointData.innerHTML += `<hr>`;
+          });
+
+          // create a point to include in the bounding box for zooming/fit bounds
+          let myClickedPoint = {
+            type: "Feature",
+            properties: {
+              Name: "clicked point",
+            },
+            geometry: {
+              type: "Point",
+              coordinates: [lng, lat],
+            },
+          };
+
+          // add the click point to the array for the bounding box
+          nearestPoints.push(myClickedPoint);
+          console.log("np+cp", nearestPoints);
+
+          let bbox = turf.bbox(turf.featureCollection(nearestPoints));
+          console.log(bbox);
+          if (!srch) {
+            map.fitBounds(bbox, {
+              padding: { top: 100, bottom: 100, left: 100, right: 400 },
+            });
+          } else {
+            srch = false;
+          }
+        }
+      });
+    </script>
+  </body>
+</html>
