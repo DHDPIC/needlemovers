@@ -10,11 +10,14 @@
 
     <meta http-equiv="Permissions-Policy" content="interest-cohort=()" />
 
+    <!-- load in mapbox search-->
     <link
       href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css"
       rel="stylesheet"
     />
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+
+    <!-- load in turf for point search and wrangling-->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 
     <!-- load in geocode search-->
@@ -25,6 +28,7 @@
       type="text/css"
     />
 
+    <!-- load in d3 for mini charts-->
     <script src="https://d3js.org/d3.v4.js"></script>
     <style>
       body {
@@ -78,6 +82,7 @@
         background-color: rgba(243, 245, 249, 1);
       }
 
+      /* bit to cover map and focus user on search*/
       #cover {
         position: absolute;
         top: 0px;
@@ -91,7 +96,7 @@
         overflow: scroll;
         padding: 16px;
       }
-
+      /* transition this away */
       .cover-faded {
         visibility: hidden;
         opacity: 0;
@@ -105,10 +110,8 @@
         background-color: rgba(222, 234, 226, 0.8);
       }
 
+      /* button to explore map */
       #explore {
-        /*position:absolute;
-        top: 40%+50px;
-        left: 50%;*/
         position: absolute;
         top: 48px;
         left: 0px;
@@ -129,6 +132,22 @@
         box-shadow: 0px 5px 8px 0px rgba(0, 0, 0, 0.2);
         cursor: pointer;
       }
+
+      .loaddash {
+        color: #fff;
+        background-color: #6666ff;
+        border-radius: 8px;
+        padding: 8px;
+        border: none;
+        box-shadow: 0px 3px 5px 0px rgba(0, 0, 0, 0.2);
+      }
+
+      .loaddash:hover {
+        color: #000;
+        background-color: #6666ff;
+        box-shadow: 0px 5px 8px 0px rgba(0, 0, 0, 0.2);
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -142,11 +161,13 @@
           value="total"
           checked="true"
         />
-        <label for="total">NeedleMovers Total</label><br />
+        <label for="total">CDD + HDD</label><br />
+        <input type="radio" id="sub" name="colorby" value="sub" />
+        <label for="sub">CDD - HDD</label><br />
         <input type="radio" id="sun" name="colorby" value="sun" />
-        <label for="sun">Sun strategy</label><br />
+        <label for="sun">CDD</label><br />
         <input type="radio" id="shade" name="colorby" value="shade" />
-        <label for="shade">Shade strategy</label>
+        <label for="shade">HDD</label>
       </div>
       <hr />
       <div id="filterbyui">
@@ -183,7 +204,7 @@
     </div>
 
     <script>
-      // how to sort
+      // how to sort weighted (better) or in order (not so nuanced but can prioritise one value)
       let weightedSort = true;
 
       // vars for click location
@@ -191,8 +212,7 @@
       let lat;
       let ele;
 
-      const zoomThreshold = 5;
-
+      // var for opening spinning globe
       let spinEnabled = true;
       const secondsPerRevolution = 90;
       // Above zoom level 5, do not rotate.
@@ -200,6 +220,7 @@
       // Rotate at intermediate speeds between zoom levels 3 and 5.
       const slowSpinZoom = 3;
 
+      // mapbox
       mapboxgl.accessToken =
         "pk.eyJ1IjoiZGhkcGljIiwiYSI6IkZfUEVoTUUifQ.rNj-tr8788GTdoGnyMEtAQ";
       const map = new mapboxgl.Map({
@@ -216,27 +237,24 @@
         zoom: 3.0,
       });
 
+      // add custom attribution screen layout
       map.addControl(new mapboxgl.AttributionControl(), "bottom-left");
 
+      // get stuck into mapmaking
       map.on("load", () => {
         function spinGlobe() {
           console.log("spin");
           const zoom = map.getZoom();
-          //if (spinEnabled && !userInteracting && zoom < maxSpinZoom) {
           let distancePerSecond = 360 / secondsPerRevolution;
-          //if (zoom > slowSpinZoom) {
           // Slow spinning at higher zooms
           const zoomDif = (maxSpinZoom - zoom) / (maxSpinZoom - slowSpinZoom);
           distancePerSecond *= zoomDif;
-          //}
           const center = map.getCenter();
           center.lng -= distancePerSecond;
-          // Smoothly animate the map over one second.
           // When this animation is complete, it calls a 'moveend' event.
           map.easeTo({ center, duration: 1000, easing: (n) => n });
-          //}
         }
-
+        // start spinning the globe immediately
         spinGlobe();
 
         map.on("moveend", () => {
@@ -245,14 +263,16 @@
           }
         });
 
+        // set atmospherics
         map.setFog({
-          color: "rgb(186, 210, 235)", // Lower atmosphere
-          "high-color": "rgb(200, 200, 223)", // Upper atmosphere
+          color:"#b3cbe3",//"rgb(186, 210, 235)", // Lower atmosphere
+          "high-color": "#dbd1e3",//"rgb(200, 200, 223)", // Upper atmosphere
           "horizon-blend": 0.03, // Atmosphere thickness (default 0.2 at low zooms)
-          "space-color": "rgb(250, 245, 255)", // Background color
+          "space-color": "#fffbf7",//"rgb(250, 245, 255)", // Background color
           "star-intensity": 0.0, // Background star brightness (default 0.35 at low zoooms )
         });
 
+        // section for marker and pop up definition
         var marker = new mapboxgl.Marker({
           color: "#000",
           scale: 0.8,
@@ -265,6 +285,7 @@
 
         var popup = new mapboxgl.Popup({});
 
+        // add the data!
         map.addSource("epwData", {
           type: "geojson",
           data: "data/x-combined.geojson",
@@ -273,6 +294,8 @@
           //clusterRadius: 100, // Radius of each cluster when clustering points (defaults to 50)
         });
 
+        // this isn't really used but useful to store in case variable-ising things
+        // plus this is a very nice color palette!
         let ptExpr = ["get", "HDD18"];
         let ptColor = [
           "interpolate",
@@ -290,8 +313,8 @@
           "#FE295E",
         ];
 
+        // radio button interface for color-by options
         let rad = document.querySelectorAll("input[name=colorby]");
-        //console.log(rad);
 
         for (var i = 0; i < rad.length; i++) {
           rad[i].addEventListener("change", function () {
@@ -302,100 +325,109 @@
                 "interpolate",
                 ["linear"],
                 ["+", ["get", "CDD10"], ["get", "HDD18"]],
-                0,
-                "#003033",
-                2000,
-                "#47C2FF",
+                1000,
+                "#ffb973",
                 4000,
-                "#B3C6FA",
-                6000,
-                "#FEB6F8",
-                8000,
-                "#FE295E",
+                "#ff73b9",
+                7000,
+                "#2a0054",
               ]);
               map.setPaintProperty("unclustered-highlighted", "circle-color", [
                 "interpolate",
                 ["linear"],
                 ["+", ["get", "CDD10"], ["get", "HDD18"]],
-                0,
-                "#003033",
-                2000,
-                "#47C2FF",
+                1000,
+                "#ffb973",
                 4000,
-                "#B3C6FA",
-                6000,
-                "#FEB6F8",
-                8000,
-                "#FE295E",
+                "#ff73b9",
+                7000,
+                "#2a0054",
               ]);
-            } else if (this.value === "sun") {
-              ptExpr = ["get", "HDD18"];
+            } else if (this.value === "sub") {
+              ptExpr = ["-", ["get", "CDD10"], ["get", "HDD18"]];
               map.setPaintProperty("unclustered-point", "circle-color", [
                 "interpolate",
                 ["linear"],
-                ["get", "HDD18"],
-                0,
+                ["-", ["get", "CDD10"], ["get", "HDD18"]],
+                -4000,
                 "#003033",
-                2000,
+                -2000,
                 "#47C2FF",
-                4000,
+                0,
                 "#B3C6FA",
-                6000,
+                2000,
                 "#FEB6F8",
-                8000,
+                4000,
                 "#FE295E",
               ]);
               map.setPaintProperty("unclustered-highlighted", "circle-color", [
                 "interpolate",
                 ["linear"],
-                ["get", "HDD18"],
-                0,
+                ["-", ["get", "CDD10"], ["get", "HDD18"]],
+                -4000,
                 "#003033",
-                2000,
+                -2000,
                 "#47C2FF",
-                4000,
+                0,
                 "#B3C6FA",
-                6000,
+                2000,
                 "#FEB6F8",
-                8000,
+                4000,
                 "#FE295E",
               ]);
-            } else if (this.value === "shade") {
+            } else if (this.value === "sun") {
               ptExpr = ["get", "CDD10"];
               map.setPaintProperty("unclustered-point", "circle-color", [
                 "interpolate",
                 ["linear"],
                 ["get", "CDD10"],
-                0,
-                "#003033",
-                2000,
-                "#47C2FF",
+                1000,
+                "#ffb973",
                 4000,
-                "#B3C6FA",
-                6000,
-                "#FEB6F8",
-                8000,
-                "#FE295E",
+                "#ff73b9",
+                7000,
+                "#2a0054",
               ]);
               map.setPaintProperty("unclustered-highlighted", "circle-color", [
                 "interpolate",
                 ["linear"],
                 ["get", "CDD10"],
-                0,
-                "#003033",
-                2000,
-                "#47C2FF",
+                1000,
+                "#ffb973",
                 4000,
-                "#B3C6FA",
-                6000,
-                "#FEB6F8",
-                8000,
-                "#FE295E",
+                "#ff73b9",
+                7000,
+                "#2a0054",
+              ]);
+            } else if (this.value === "shade") {
+              ptExpr = ["get", "HDD18"];
+              map.setPaintProperty("unclustered-point", "circle-color", [
+                "interpolate",
+                ["linear"],
+                ["get", "HDD18"],
+                1000,
+                "#ffb973",
+                4000,
+                "#ff73b9",
+                7000,
+                "#2a0054",
+              ]);
+              map.setPaintProperty("unclustered-highlighted", "circle-color", [
+                "interpolate",
+                ["linear"],
+                ["get", "HDD18"],
+                1000,
+                "#ffb973",
+                4000,
+                "#ff73b9",
+                7000,
+                "#2a0054",
               ]);
             }
           });
         }
 
+        // filter proof of concept using elevation
         let eleMin = document.querySelector("input[id=elemin]");
         let eleMax = document.querySelector("input[id=elemax]");
         let eleMinVal = 0;
@@ -444,6 +476,7 @@
           eleMaxSpan.innerHTML = eleMaxVal + "m";
         });
 
+        // search functionality!
         let srch = false;
 
         let searcher = new MapboxGeocoder({
@@ -460,6 +493,7 @@
           clearOnBlur: true,
         });
 
+        // functions to control disappearing the cover after search/explore
         function disappearCover() {
           let cov = document.querySelector("#cover");
           let geo = document.querySelector(".geocoder");
@@ -491,9 +525,9 @@
           });
         }
 
-        //- Using a function pointer:
         document.querySelector("#explore").onclick = disappearCover2;
 
+        // searcher events
         searcher.on("result", (e) => {
           disappearCover();
         });
@@ -515,13 +549,10 @@
           map.setFilter("unclustered-highlighted", ["in", "WMO", ""]);
         });
 
-        /*map.addControl(
-          // add search box
-          searcher
-        );*/
-
+        // add searcher to map
         document.getElementById("geocoder").appendChild(searcher.onAdd(map));
 
+        // handle different map movements
         map.on("moveend", (e) => {
           //console.log("A moveend event occurred.");
           if (srch) {
@@ -529,6 +560,7 @@
           }
         });
 
+        // add point layers
         map.addLayer({
           id: "unclustered-point",
           type: "circle",
@@ -541,18 +573,31 @@
               "interpolate",
               ["linear"],
               ["+", ["get", "CDD10"], ["get", "HDD18"]],
-              0,
-              "#003033",
               2000,
-              "#47C2FF",
+              "#ffb973",
               4000,
-              "#B3C6FA",
+              "#ff73b9",
               6000,
-              "#FEB6F8",
-              8000,
-              "#FE295E",
+              "#2a0054",
             ],
             "circle-opacity": 1,
+            // interpolate opacity for how many hours there are
+            /*"circle-opacity": [
+              "interpolate",
+              ["linear"],
+              ["+", ["get", "CDD10"], ["get", "HDD18"]],
+              0,
+              0,
+              6000,
+              0.25,
+              12000,
+              0.5,
+              18000,
+              0.75,
+              24000,
+              1,
+            ],*/
+            //
             "circle-radius": [
               "interpolate",
               ["linear"],
@@ -577,16 +622,12 @@
               "interpolate",
               ["linear"],
               ["+", ["get", "CDD10"], ["get", "HDD18"]],
-              0,
-              "#003033",
               2000,
-              "#47C2FF",
+              "#ffb973",
               4000,
-              "#B3C6FA",
+              "#ff73b9",
               6000,
-              "#FEB6F8",
-              8000,
-              "#FE295E",
+              "#2a0054",
             ],
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 3, 10, 8], //6,
             "circle-stroke-width": [
@@ -621,6 +662,7 @@
           }
         );
 
+        // add click functionality
         map.on("click", function (e) {
           console.log("click on the map");
           lng = e.lngLat.lng;
@@ -642,8 +684,10 @@
 
             const coordinates = f[0].geometry.coordinates.slice();
             const popName = f[0].properties.name;
-            const popElevation = `Elevation: ${f[0].properties.Elevation}m`;
-            const popDownload = `<a href="${f[0].properties.URL}">Load File into Dashboard</a>`;
+            const popElevation = `<strong>Elevation:</strong> ${f[0].properties.Elevation}m`;
+            //const popDownload = `<a href="${f[0].properties.URL}">Load File into Dashboard</a>`;
+            const popDownload = `<button class="loaddash" onclick='window.location.href="${f[0].properties.URL}"'>Load File into Dashboard</button>`;
+            
             const popContent = `<h4>${popName}</h4><div>${popElevation}</div><div>${popDownload}</div>`;
 
             // make sure there aren't duplicates
@@ -652,12 +696,10 @@
             }
 
             //new mapboxgl.Popup()
-            popup
-              .setLngLat(coordinates)
-              .setHTML(popContent)
-              .addTo(map);
-            //
-            getElevation(e);
+            popup.setLngLat(coordinates).setHTML(popContent).addTo(map);
+
+            // uncomment the below if you want to recalculate recommended points when clicking a point
+            //getElevation(e);
             showMarker = true;
           } else {
             console.log("nothing!");
@@ -668,11 +710,12 @@
           }
         });
 
+        // draggable marker function
         function onMarkerDragEnd() {
           console.log("dragged the marker");
           const coords = marker.getLngLat();
-          lng = coords.lng;//e.lngLat.lng;
-          lat = coords.lat;//e.lngLat.lat;
+          lng = coords.lng; //e.lngLat.lng;
+          lat = coords.lat; //e.lngLat.lat;
           console.log("drag lng", lng, "drag lat", lat);
           showMarker = true;
 
@@ -681,60 +724,10 @@
           getElevation();
         }
 
-        /*map.on(
-          "click",
-          ["unclustered-point", "unclustered-highlighted"],
-          (e) => {
-            console.log("click for a pop up");
-            //map.removeLayer(marker);
-            showMarker = false;
-
-            const coordinates = e.features[0].geometry.coordinates.slice();
-            const popName = e.features[0].properties.name;
-            const popElevation = `Elevation: ${e.features[0].properties.Elevation}m`;
-            const popDownload = `<a href="${e.features[0].properties.URL}">Load File into Dashboard</a>`;
-            const popContent = `<h4>${popName}</h4><div>${popElevation}</div><div>${popDownload}</div>`;
-
-            // make sure there aren't duplicates
-            while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
-              coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
-            }
-
-            new mapboxgl.Popup()
-              .setLngLat(coordinates)
-              .setHTML(popContent)
-              .addTo(map);
-          }
-        );*/
-
-        /*map.on("zoom", () => {
-          if (map.getZoom() > zoomThreshold) {
-            map.setPaintProperty("unclustered-point", "circle-opacity", 1);
-            map.setPaintProperty("unclustered-highlighted", "circle-opacity", 1);
-          } else {
-            map.setPaintProperty("unclustered-point", "circle-opacity", 0);
-            map.setPaintProperty("unclustered-highlighted","circle-opacity",1);
-          }
-        });*/
-
-        /*map.on("click", (e) => {
-          console.log("click on the map");
-          console.log("l:", e);
-          console.log(map.getStyle().layers);
-
-          lng = e.lngLat.lng;
-          lat = e.lngLat.lat;
-          console.log("click lng", lng, "click lat", lat);
-
-          showMarker = true;
-
-          getElevation(e);
-        });*/
-
+        // this is the big function that does all the searching for points and recommendations
         async function getElevation(e) {
           console.log("get elevation...");
 
-          //
           // add marker
           if (showMarker) {
             marker.setLngLat([lng, lat]).addTo(map);
@@ -773,18 +766,20 @@
           // search for nearest points with turf js
           let clickPoint = turf.point([lng, lat]);
 
-          let nearestPoints = [];
+          let nearestPoints = new Array(0);
           console.log("nearestpoint", nearestPoints);
 
           // alternative approach is to search source features, not rendered features,
           // but then would need to filter the returned source data by elevation or other filters.
           let epwcheck = map.querySourceFeatures("epwData");
+          //console.log("epw c:", epwcheck);
+          // or query rendered features has the filtering baked in
           /*let epwcheck = map.queryRenderedFeatures({
             layers: ["unclustered-point"],
           });*/
           //console.log("epw check 1", epwcheck);
 
-          // filter for altitude!!!
+          // filter for elevation
           epwcheck = epwcheck.filter(
             (item) =>
               item.properties.Elevation <= eleMaxVal &&
@@ -797,8 +792,30 @@
 
           // using 15 points because of triplicate files
           let searchLength = Math.min(15, epwcheck.length);
-          //console.log("searchLength", searchLength);
+          console.log("searchLength", searchLength);
 
+          // this is a conditional that could be used to prevent the infinite zoom issue!
+          if (searchLength <= 0) {
+            console.log(
+              ">> !!! no points found divert behaviour to zoom out !!! <<"
+            );
+            // zoom out
+            srch = true;
+            map.zoomTo(map.getZoom() * 0.65, {
+              duration: 2000,
+              padding: { top: 100, bottom: 100, left: 100, right: 500 },
+            });
+            //empty point data
+            document.querySelector("#pointData").innerHTML = "";
+            // clear highlighted points
+            map.setFilter("unclustered-highlighted", ["in", "WMO", ""]);
+
+            // escape rest of function
+            return;
+          }
+
+          // correct points for boundary issues if using a mercator (or other) projection
+          // might be redundant with a globe
           for (let i = 0; i < searchLength; i++) {
             var geoJ = turf.nearestPoint(clickPoint, tfC);
             //if (Math.abs(e.lngLat.lng - geoJ.geometry.coordinates[0]) > 180) {
@@ -818,6 +835,8 @@
           // not sure if this line below is useful or not!
           //epwData.features.push(...nearestPoints);
 
+          // generate a list of names to filter by
+          // those listed will be highlighted
           const myFeatures = nearestPoints.map(
             (feature) => feature.properties.name
           );
@@ -832,6 +851,7 @@
           console.log("filtering done");
 
           //sort features
+          // create arrays to store data to evaluate (this is overkill, we only need a score array)
           if (weightedSort) {
             wEleArr = [];
             wLatArr = [];
@@ -854,16 +874,17 @@
                 nearestPoints[i].geometry.coordinates,
                 clickPoint
               );
+              // here is the important bit.
+              // Note the multiplier adjusts for vastly different scales of data
+              // eg. elevation is in metres, distance in kilometres,
+              // and latitude fractions of a degree can mean an important difference!
+              // adjust the multiplier by the data scale and their importance
               wScoArr[i] = wEleArr[i] * 1 + wLatArr[i] * 1000 + wDisArr[i] * 10;
               // add into nearestPoints
               nearestPoints[i].properties.distance = wDisArr[i];
               nearestPoints[i].properties.score = wScoArr[i];
             }
-            /*console.log("ele", ele);
-            console.log("w e",wEleArr);
-            console.log("lat", lat);
-            console.log("w l",wLatArr);
-            console.log("w d",wDisArr);*/
+
             console.log("score", wScoArr);
             //console.log("np sc", nearestPoints);
 
@@ -886,7 +907,7 @@
             });
           }
 
-          // add data to overlay
+          // add data to overlay panel
           let pointData = document.querySelector("#pointData");
           let clickData = document.querySelector("#clickData");
           //clickData.innerHTML = `Search/Click Point Elevation: ${ele}m<br/>Search/Click Point Latitude: ${lat.toFixed(3)}<hr><br/><h3>Files ranked by elevation then latitude similarity to clicked point:</h3>`;
@@ -894,15 +915,15 @@
             3
           )}`;
           pointData.innerHTML = "";
+
+          // add the D3 chart to each point info
           nearestPoints.forEach((element) => {
             // make an svg for each point
-
             // make data from temperatures
             let tempData = [
               element.properties["1% Cooling DB"],
               element.properties["99% Heating DB"],
             ];
-
             //console.log("temp data", tempData);
 
             // color
@@ -910,7 +931,8 @@
               .scaleLinear()
               .domain([-50, -25, 0, 25, 50])
               //.range(["royalblue", "skyblue", "honeydew", "gold", "red"])
-              .range(["#003033", "#47C2FF", "#B3C6FA", "#FEB6F8", "#FE295E"])
+              .range(["#003033", "#47C2FF", "#B3C6FA", "#FEB6F8", "#FE295E"]) // very nice color palette
+              //.range(["#ffdefc", "#8c0f81"])
               .clamp(true);
 
             // set the dimensions and margins of the graph
@@ -920,7 +942,6 @@
 
             // append the svg object to the body of the page
             var svg = d3
-              //.select("#my_dataviz")
               .select("#pointData")
               .append("svg")
               .attr("width", sparkWidth + sparkMargin.left + sparkMargin.right)
@@ -934,9 +955,8 @@
                 "translate(" + sparkMargin.left + "," + sparkMargin.top + ")"
               );
 
-            // X axis
+            // Add X axis
             var x = d3.scaleLinear().domain([-50, 50]).range([0, sparkWidth]);
-
             svg
               .append("g")
               .attr("transform", "translate(0," + sparkHeight + ")")
@@ -983,28 +1003,29 @@
               .style("fill", (d) => {
                 return SparkColorScale(d);
               });
-            //
 
-            pointData.innerHTML += `<div>${element.properties.WMO}: ${element.properties.name}</div>`;
-            pointData.innerHTML += `<div>Distance: ${element.properties.distance.toFixed(
+            // add html to right panel
+            pointData.innerHTML += `<div><h3>${element.properties.WMO}: ${element.properties.name}</h3></div>`;
+            pointData.innerHTML += `<div><strong>Distance:</strong> ${element.properties.distance.toFixed(
               2
             )}km</div>`;
-            pointData.innerHTML += `<div>Elevation: ${element.properties.Elevation}m</div>`;
-            pointData.innerHTML += `<div>E Delta: ${Math.abs(
+            pointData.innerHTML += `<div><strong>Elevation:</strong> ${element.properties.Elevation}m</div>`;
+            pointData.innerHTML += `<div><em>E Delta:</em> ${Math.abs(
               element.properties.Elevation - ele
             )}m</div>`;
-            pointData.innerHTML += `<div>Latitude: ${element.geometry.coordinates[1].toFixed(
+            pointData.innerHTML += `<div><strong>Latitude:</strong> ${element.geometry.coordinates[1].toFixed(
               3
             )}</div>`;
-            pointData.innerHTML += `<div>L Delta: ${Math.abs(
+            pointData.innerHTML += `<div><em>L Delta:</em> ${Math.abs(
               element.geometry.coordinates[1] - lat
             ).toFixed(3)}</div>`;
-            pointData.innerHTML += `<div>Score: ${
+            pointData.innerHTML += `<div><strong>Score:</strong> ${
               element.properties.score.toFixed(2)
               //Math.abs(element.properties.Elevation - ele) / 8000 +
               //Math.abs(element.geometry.coordinates[1] - lat) / 90
             }</div>`;
-            pointData.innerHTML += `<div><a href="${element.properties.URL}">Load File into Dashboard</a></div>`;
+            //pointData.innerHTML += `<div><a href="${element.properties.URL}">Load File into Dashboard</a></div>`;
+            pointData.innerHTML += `<div><button class="loaddash" onclick='window.location.href="${element.properties.URL}"'>Load File into Dashboard</button></div>`;
             pointData.innerHTML += `<hr>`;
           });
 
@@ -1032,17 +1053,17 @@
             },
           };
 
-
           // add the click point to the array for the bounding box
           nearestPoints.push(myClickedPoint);
           nearestPoints.push(myMarkerPoint);
           console.log("np+cp", nearestPoints);
 
+          // move the map to take in all the points
           let bbox = turf.bbox(turf.featureCollection(nearestPoints));
           console.log(bbox);
           if (!srch) {
             map.fitBounds(bbox, {
-              padding: { top: 100, bottom: 100, left: 100, right: 400 },
+              padding: { top: 100, bottom: 100, left: 100, right: 500 },
             });
           } else {
             srch = false;
